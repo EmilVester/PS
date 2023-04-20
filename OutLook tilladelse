@@ -1,0 +1,34 @@
+# Erstat "RemoteComputer" med ip adressen på remote computeren
+$ComputerName = "RemoteComputer"
+
+$Session = New-PSSession -ComputerName $ComputerName
+
+# Definer scrip som køres på remote pc
+$ScriptBlock = {
+
+Import-Module Outlook
+
+$BrugerNavn = "Dit Navn"
+
+$AdgangsBruger = "Alle"
+
+# Få Outlook brugerprofilen for den aktuelle bruger
+$Outlook = New-Object -ComObject Outlook.Application
+$Namespace = $Outlook.GetNameSpace("MAPI")
+$Modtager = $Namespace.CreateRecipient($BrugerNavn)
+$Kalender = $Namespace.GetSharedDefaultFolder($Modtager, 9)
+
+# Giv tilladelser til den angivne bruger eller gruppe
+$Regel = $Kalender.GetPermission($AdgangsBruger)
+if ($Regel -eq $null) {
+    $Regel = $Kalender.GetPermission("Standard")
+    $Regel.CreatePermission($AdgangsBruger, 2)
+    Write-Output "Tilladelser givet til $AdgangsBruger"
+} else {
+    Write-Output "Tilladelser for $AdgangsBruger eksisterer allerede"
+}
+
+# Kør scriptet som defineret i Scriptblock
+Invoke-Command -Session $Session -ScriptBlock $ScriptBlock
+
+Remove-PSSession $Session
