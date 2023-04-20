@@ -1,0 +1,36 @@
+# Opret en central placering i SharePoint Online til at synkronisere OneDrive for Business-mapperne
+Connect-PnPOnline -Url https://yourtenant.sharepoint.com -UseWebLogin
+New-PnPList -Title "OneDrive for Business Sync" -Template DocumentLibrary
+
+# Konfigurer version control på alle filer og mapper i OneDrive for Business-mapperne
+Connect-PnPOnline -Url https://yourtenant-my.sharepoint.com -UseWebLogin
+Set-PnPListItem -List "Documents" -Identity 1 -Values @{"_ModerationStatus"="2"}
+
+# Flyt alle filer i medarbejdernes OneDrive for Business-mapper, der er ældre end 90 dage, til en dedikeret arkivmappe i SharePoint Online-miljøet
+Connect-PnPOnline -Url https://yourtenant-my.sharepoint.com -UseWebLogin
+$OldFiles = Get-PnPListItem -List "Documents" -Fields "FileLeafRef", "Modified" | Where-Object {($_.Modified -lt (Get-Date).AddDays(-90))}
+Connect-PnPOnline -Url https://yourtenant.sharepoint.com -UseWebLogin
+$ArchiveFolder = Add-PnPFolder -Name "OneDrive Archive" -List "OneDrive for Business Sync"
+foreach ($OldFile in $OldFiles) {
+    Move-PnPFile -ServerRelativeUrl "/personal/username/OneDrive - Your Company/Documents/$($OldFile.FieldValues.FileLeafRef)" -Destination "/sites/OneDrive for Business Sync/OneDrive Archive/$($OldFile.FieldValues.FileLeafRef)"
+}
+
+# Implementer en overvågningsløsning, der giver besked til administratorerne, når der sker utilsigtet sletning eller ændring af en fil i OneDrive for Business-mapperne.
+Connect-PnPOnline -Url https://yourtenant-my.sharepoint.com -UseWebLogin
+$FolderUrl = "/personal/username/OneDrive - Your Company/Documents"
+$WatchPath = Join-Path -Path $env:temp -ChildPath "OneDrive-Watch"
+New-Item -ItemType Directory -Path $WatchPath -Force
+Start-Process "fsutil" -ArgumentList "file createnew", (Join-Path $WatchPath "OneDriveWatch.txt"), "1024" -NoNewWindow -Wait
+Get-ChildItem -Path $WatchPath -Recurse | Where-Object {$_.FullName -ne (Join-Path $WatchPath "OneDriveWatch.txt")} | Remove-Item -Force
+Add-PnPFileSystemWatch -Path $FolderUrl -IncludeSubdirectories -NotifyFilter LastWrite | Out-Null
+while ($true) {
+    $Event = Wait-PnPFileSystemEvent
+    if ($Event.ChangeType -ne "Renamed") {
+        $Message = "File " + $Event.FullPath + " has been " + $Event.ChangeType
+        Send-MailMessage -To "admin@yourcompany.com" -Subject "OneDrive for Business file event" -Body $Message -SmtpServer "smtp.yourcompany.com"
+    }
+}
+
+# Udfør regelmæssig arkivering af data fra SharePoint Online-miljøet til en sikkerhedskopi i en anden placering
+Connect-PnPOnline -Url https://yourtenant.sharepoint.com -UseWebLogin
+Start-PnPBackup -Folder "\\backupserver\OneDrive for Business Backup" -
